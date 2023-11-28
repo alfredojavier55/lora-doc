@@ -1,0 +1,1658 @@
+---
+title: "LiRA - WG1 Working example Disease Occurrence Cases (doc)"
+author: "Alfredo Acosta SVA"
+date: "`r Sys.Date()`"
+output:
+  html_document: 
+    toc: yes
+    toc_float: true
+    theme: cosmo
+    fig_caption: yes
+    number_sections: yes
+    code_folding: hide
+  word_document: default
+  html_notebook: 
+    toc: yes
+---
+# Working example disease occurrence - cases
+The code use wahis and faostat db to check the columns needed.
+-Please feel free to analyse the code and run from your terminal (there is a folder with the code and data on: DG1 Disease occurrence > datasources > working examples > doc > doc.Rmd)
+
+# Loading libraries 
+```{r }
+# Library ----
+library(readxl)
+library(dplyr)
+library(lubridate)
+library(leaflet)
+library(sf)
+library(DT)
+```
+
+```{r}
+setwd("C:/Users/alfredo.acosta/OneDrive - SVA/LORA/Working example/ocurrence_of_disease/")
+```
+
+
+# DB WAHIS-INFUR & FAOSTAT 
+## Reading infur
+```{r warning=FALSE}
+w <- read_xlsx("infur_20230407.xlsx")
+# colnames(w)
+# table(w$reporting_level)
+# table(w$disease_eng)
+# table(w$Species, w$is_wild == TRUE) #wild species
+# table(w$Species[w$is_wild == FALSE]) #domestic species
+# 
+# View(w[w$disease_eng == "Rabies virus (Inf. with)" | w$disease_esp == "Cattle",])
+# View(w[w$disease_eng == "Bluetongue virus (Inf. with)" | w$disease_esp == "Cattle",])
+# View(w[w$disease_eng == "West Nile Fever" | w$Species_fg == "Equidae_(dom)",])
+# View(w[w$disease_eng == "High pathogenicity avian influenza viruses (poultry) (Inf. with)" | w$Species_fg == "Birds_dom",])
+# table(w$disease_eng == "West Nile Fever", w$Species_fg)
+
+```
+
+## Modification in species category wahis (w) to match population FAOSTAT (p)
+## New variable species of functional groups
+```{r}
+table(w$Species[w$is_wild == FALSE]) #domestic species TO MATCH
+
+table(w$Species[w$is_wild == FALSE]) %>% 
+  as.data.frame() %>% 
+  arrange(desc(Freq))
+
+w$Species_fg <- w$Species
+w$Species_fg <- gsub("[[:space:]]", "_", w$Species_fg) #Horses
+w$Species_fg <- gsub("Birds", "Birds_dom", w$Species_fg) #Birds
+# w$Species_fg <- gsub("^Equidae_(dom)", "Equidae_dom", w$Species_fg) #Horses
+
+head(table(w$Species_fg[w$is_wild == FALSE]) %>% 
+  as.data.frame() %>% 
+  arrange(desc(Freq)), 15)
+
+```
+```{r}
+  # DB FAOSTATS ----
+  # p=population of animals
+  p <- read.csv(file="FAOSTAT_data_en_10-25-2023.csv")
+  
+# Duplicating world population from 2021 to 2022 & 2023
+  p2022 <- p %>% filter(Year == 2021) %>% mutate(Year = gsub("2021", "2022", Year))
+  p2023 <- p %>% filter(Year == 2021) %>% mutate(Year = gsub("2021", "2023", Year))
+
+  p <- rbind(p, p2022, p2023)
+
+  colnames(p)
+  table(p$Item)
+  head(p)
+  
+  # Species
+  p$Item <- gsub("Swine / pigs","Swine", p$Item)
+  p$Item <- gsub("Horses","Equidae_(dom)", p$Item)
+  p$Item <- gsub("^Asses","Equidae_(dom)", p$Item)
+  p$Item <- gsub("Mules and hinnies","Equidae_(dom)", p$Item)
+  p$Item <- gsub("Chickens","Birds_dom", p$Item)
+  p$Item <- gsub("Ducks","Birds_dom", p$Item)
+  p$Item <- gsub("Geese","Birds_dom", p$Item)
+  p$Item <- gsub("Turkeys","Birds_dom", p$Item)
+  
+  table(p$Item)
+  table(p$Item)
+  table(p$Year)
+  colnames(p)
+
+```
+## Probabiltiy definitions (lira table)
+```{r}
+lira_prob <- read.csv(file = "ranges.csv", sep = ";")
+lira_prob$Range <- cut(lira_prob$range, breaks = lira_prob$range, include.lowest = TRUE)
+lira_prob <- lira_prob[-7,]
+lira_prob
+```
+
+
+## Reading the World map
+```{r}
+wm <- st_read("TM_WORLD_BORDERS_SIMPL-0.3.shp")
+
+```
+
+# Example montly occurrence of disease compared to accumulated three months
+## Set the disease, date, and functional group (species)
+```{r}
+disease_to_analyse <- "African swine fever virus (Inf. with)"
+date_to_analyse <- ymd("2021-08-01") #ASF HPAI 
+species_to_analyse <- "Swine"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+```
+## Montly Results
+```{r}
+{
+  
+  w$date <- floor_date(w$`event_start date`, unit="month")
+  
+  # Number of outbreaks
+  outb <- w %>% 
+    filter(date == date_to_analyse) %>% 
+    filter(disease_eng == disease_to_analyse) %>%
+    filter(Species_fg == species_to_analyse) %>%
+    filter(reporting_level == "disease") %>%
+    group_by(Species_fg, iso_code, country, date) %>% 
+    summarize(outbreak=n())
+  outb
+  
+  # Number of Cases ----
+  # Species is for domestic and have the same ID as in faostats
+  cases <- w %>% 
+    filter(date == date_to_analyse) %>% 
+    filter(disease_eng == disease_to_analyse) %>% 
+    filter(Species_fg == species_to_analyse) %>% 
+    filter(reporting_level == "disease") %>% 
+    group_by(Species_fg, iso_code, country, date) %>% 
+    summarize(cases=sum(cases, na.rm = TRUE))
+  cases
+  
+#Population of animals  
+  pop <- p %>% 
+    filter(Item %in% cases$Species_fg) %>% 
+    filter(Area.Code..ISO3. %in% cases$iso_code) %>% 
+    filter(Year %in% year(date_to_analyse))
+  
+  # WORLD MAP ----
+  # Update the number of outbreaks on the map
+  wm$outbreak <- outb$outbreak[match(wm$ISO3, outb$iso_code)]
+  
+    # Update the number of cases on the map
+  wm$cases <- cases$cases[match(wm$ISO3, cases$iso_code)]
+  
+  # Update the population on the map
+  wm$pop <- pop$Value[match(wm$ISO3, pop$Area.Code..ISO3.)]
+  
+  # calculate the prevalence ----
+  wm$prev <- wm$cases/wm$pop
+ 
+  # Maps of outbreaks
+  pal <- colorNumeric(
+    palette = "Spectral",
+    domain = wm$outbreak, 
+    na.color = "white"
+  )
+  
+# Maps of cases ----
+pal <- colorNumeric(
+  palette = "Spectral",
+   reverse = TRUE,
+  domain = wm$cases, 
+  na.color = "white")
+
+map <- leaflet(wm) %>%
+  addProviderTiles(providers$CartoDB.Positron)
+
+mc <- map %>%
+  setView(lng = 25, lat = 10, zoom = 2) %>%
+  addPolygons(weight = 0.5, 
+              color = ~pal(cases),
+              popup = ~paste(NAME, cases)) %>% 
+  addLegend("bottomright", pal = pal, values = ~cases,
+            title = paste("Cases",
+                          "<br>",
+                          date_to_analyse, 
+                          "<br>", 
+                          disease_to_analyse),
+            opacity = 1)
+
+# Map of disease occurrence ----
+pal <- colorNumeric(
+  palette = "Spectral",
+  reverse = TRUE,
+  domain = wm$prev, 
+  na.color = "white")
+
+map <- leaflet(wm) %>%
+  addProviderTiles(providers$CartoDB.Positron)
+
+mp <- map %>%
+  setView(lng = 25, lat = 10, zoom = 2) %>%
+  addPolygons(weight = 0.5, 
+              color = ~pal(prev),
+              popup = ~paste(NAME, prev)) %>% 
+  addLegend("bottomright", pal = pal, values = ~prev,
+            title = paste("Disease Occurrence",
+                          "<br>",
+                          date_to_analyse, 
+                          "<br>", 
+                          disease_to_analyse),
+            opacity = 1)
+
+wm$range <- cut(wm$prev, breaks = lira_prob$range, include.lowest = TRUE)
+
+wm$ranking <- lira_prob$Ranking[match(wm$range, lira_prob$Range)]
+wm$def <- lira_prob$Qualitative.probability.definition[match(wm$range, lira_prob$Range)]
+
+wm %>% 
+       as.data.frame() %>% 
+       arrange(desc(prev)) %>% 
+       filter(!is.na(prev)) %>% 
+       select(NAME, outbreak, cases, pop, prev, range, ranking, def)
+}
+
+mc
+mp
+
+```
+
+## Acumulated three months
+```{r}
+# adding last three months
+rmonth <- date_to_analyse %m+% months(1:-1) 
+
+{
+  
+  w$date <- floor_date(w$`event_start date`, unit="month")
+  
+    # Number of outbreaks
+  outb <- w %>% 
+    filter(date == rmonth[1] | date == rmonth[2] | date == rmonth[3]) %>% 
+    filter(disease_eng == disease_to_analyse) %>%
+    filter(Species_fg == species_to_analyse) %>% 
+    filter(reporting_level == "disease") %>%
+    group_by(Species_fg, iso_code, country) %>% 
+    summarize(outbreak=n())
+  
+  outb
+  
+  # Number of Cases ----
+  # Species is for domestic and have the same ID as in faostats
+  cases <- w %>% 
+    filter(date == rmonth[1] | date == rmonth[2] | date == rmonth[3]) %>% 
+    filter(disease_eng == disease_to_analyse) %>%
+    filter(Species_fg == species_to_analyse) %>% 
+    filter(reporting_level == "disease") %>%
+    group_by(Species_fg, iso_code, country) %>% 
+    summarize(cases=sum(cases, na.rm = TRUE))
+  cases
+  
+  # DB FAOSTATS ----
+  pop <- p %>% 
+    filter(Item %in% cases$Species_fg) %>% 
+    filter(Area.Code..ISO3. %in% cases$iso_code) %>% 
+    filter(Year %in% year(date_to_analyse))
+  
+  # WORLD MAP ----
+  
+    # Update the number of outbreaks on the map
+  wm$outbreak <- outb$outbreak[match(wm$ISO3, outb$iso_code)]
+
+    # Update the number of cases on the map
+  wm$cases <- cases$cases[match(wm$ISO3, cases$iso_code)]
+  
+  # Update the population on the map
+  wm$pop <- pop$Value[match(wm$ISO3, pop$Area.Code..ISO3.)]
+  
+  # Prevalence ----
+  wm$prev <- signif(wm$cases/wm$pop,3)
+ 
+# Maps of cases ----
+pal <- colorNumeric(
+  palette = "Spectral",
+   reverse = TRUE,
+  domain = wm$cases, 
+  na.color = "white")
+
+map <- leaflet(wm) %>%
+  addProviderTiles(providers$CartoDB.Positron)
+
+mc <- map %>%
+  setView(lng = 25, lat = 10, zoom = 2) %>%
+  addPolygons(weight = 0.5, 
+              color = ~pal(cases),
+              popup = ~paste(NAME, cases)) %>% 
+  addLegend("bottomright", pal = pal, values = ~cases,
+            title = paste("Cases",
+                          "<br>",
+                          date_to_analyse, 
+                          "<br>", 
+                          disease_to_analyse),
+            opacity = 1)
+
+# Map of disease occurrence ----
+pal <- colorNumeric(
+  palette = "Spectral",
+  reverse = TRUE,
+  domain = wm$prev, 
+  na.color = "white")
+
+map <- leaflet(wm) %>%
+  addProviderTiles(providers$CartoDB.Positron)
+
+mp <- map %>%
+  setView(lng = 25, lat = 10, zoom = 2) %>%
+  addPolygons(weight = 0.5, 
+              color = ~pal(prev),
+              popup = ~paste(NAME, prev)) %>% 
+  addLegend("bottomright", 
+            pal = pal, 
+            values = ~prev,
+            title = paste("Disease Occurrence (3 months)",
+                          "<br>",
+                          date_to_analyse, 
+                          "<br>", 
+                          disease_to_analyse),
+            opacity = 1)
+
+wm$range <- cut(wm$prev, breaks = lira_prob$range, include.lowest = TRUE)
+
+wm$ranking <- lira_prob$Ranking[match(wm$range, lira_prob$Range)]
+wm$def <- lira_prob$Qualitative.probability.definition[match(wm$range, lira_prob$Range)]
+
+wm %>% 
+       as.data.frame() %>% 
+       arrange(desc(prev)) %>% 
+       filter(!is.na(prev)) %>% 
+       select(NAME, outbreak, cases, pop, prev, range, ranking, def)
+
+}
+
+mc
+mp
+```
+
+## Set the disease, date, and functional group (species)
+```{r}
+disease_to_analyse <- "West Nile Fever"
+date_to_analyse <- ymd("2022-08-01")
+species_to_analyse <- "Equidae_(dom)"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+```
+
+## Montly Results
+```{r}
+{
+  
+  w$date <- floor_date(w$`event_start date`, unit="month")
+  
+  # Number of outbreaks
+  outb <- w %>% 
+    filter(date == date_to_analyse) %>% 
+    filter(disease_eng == disease_to_analyse) %>%
+    filter(Species_fg == species_to_analyse) %>%
+    filter(reporting_level == "disease") %>%
+    group_by(Species_fg, iso_code, country, date) %>% 
+    summarize(outbreak=n())
+  outb
+  
+  # Number of Cases ----
+  # Species is for domestic and have the same ID as in faostats
+  cases <- w %>% 
+    filter(date == date_to_analyse) %>% 
+    filter(disease_eng == disease_to_analyse) %>% 
+    filter(Species_fg == species_to_analyse) %>% 
+    filter(reporting_level == "disease") %>% 
+    group_by(Species_fg, iso_code, country, date) %>% 
+    summarize(cases=sum(cases, na.rm = TRUE))
+  cases
+  
+#Population of animals  
+  pop <- p %>% 
+    filter(Item %in% cases$Species_fg) %>% 
+    filter(Area.Code..ISO3. %in% cases$iso_code) %>% 
+    filter(Year %in% year(date_to_analyse))
+  
+  # WORLD MAP ----
+  # Update the number of outbreaks on the map
+  wm$outbreak <- outb$outbreak[match(wm$ISO3, outb$iso_code)]
+  
+    # Update the number of cases on the map
+  wm$cases <- cases$cases[match(wm$ISO3, cases$iso_code)]
+  
+  # Update the population on the map
+  wm$pop <- pop$Value[match(wm$ISO3, pop$Area.Code..ISO3.)]
+  
+  # calculate the prevalence ----
+  wm$prev <- wm$cases/wm$pop
+ 
+  # Maps of outbreaks
+  pal <- colorNumeric(
+    palette = "Spectral",
+    domain = wm$outbreak, 
+    na.color = "white"
+  )
+  
+# Maps of cases ----
+pal <- colorNumeric(
+  palette = "Spectral",
+   reverse = TRUE,
+  domain = wm$cases, 
+  na.color = "white")
+
+map <- leaflet(wm) %>%
+  addProviderTiles(providers$CartoDB.Positron)
+
+mc <- map %>%
+  setView(lng = 25, lat = 10, zoom = 2) %>%
+  addPolygons(weight = 0.5, 
+              color = ~pal(cases),
+              popup = ~paste(NAME, cases)) %>% 
+  addLegend("bottomright", pal = pal, values = ~cases,
+            title = paste("Cases",
+                          "<br>",
+                          date_to_analyse, 
+                          "<br>", 
+                          disease_to_analyse),
+            opacity = 1)
+
+# Map of disease occurrence ----
+pal <- colorNumeric(
+  palette = "Spectral",
+  reverse = TRUE,
+  domain = wm$prev, 
+  na.color = "white")
+
+map <- leaflet(wm) %>%
+  addProviderTiles(providers$CartoDB.Positron)
+
+mp <- map %>%
+  setView(lng = 25, lat = 10, zoom = 2) %>%
+  addPolygons(weight = 0.5, 
+              color = ~pal(prev),
+              popup = ~paste(NAME, prev)) %>% 
+  addLegend("bottomright", pal = pal, values = ~prev,
+            title = paste("Disease Occurrence",
+                          "<br>",
+                          date_to_analyse, 
+                          "<br>", 
+                          disease_to_analyse),
+            opacity = 1)
+
+wm$range <- cut(wm$prev, breaks = lira_prob$range, include.lowest = TRUE)
+
+wm$ranking <- lira_prob$Ranking[match(wm$range, lira_prob$Range)]
+wm$def <- lira_prob$Qualitative.probability.definition[match(wm$range, lira_prob$Range)]
+
+wm %>% 
+       as.data.frame() %>% 
+       arrange(desc(prev)) %>% 
+       filter(!is.na(prev)) %>% 
+       select(NAME, outbreak, cases, pop, prev, range, ranking, def)
+}
+
+mc
+mp
+
+```
+
+## Acumulated three months
+```{r}
+# adding last three months
+rmonth <- date_to_analyse %m+% months(1:-1) 
+
+{
+  
+  w$date <- floor_date(w$`event_start date`, unit="month")
+  
+    # Number of outbreaks
+  outb <- w %>% 
+    filter(date == rmonth[1] | date == rmonth[2] | date == rmonth[3]) %>% 
+    filter(disease_eng == disease_to_analyse) %>%
+    filter(Species_fg == species_to_analyse) %>% 
+    filter(reporting_level == "disease") %>%
+    group_by(Species_fg, iso_code, country) %>% 
+    summarize(outbreak=n())
+  
+  outb
+  
+  # Number of Cases ----
+  # Species is for domestic and have the same ID as in faostats
+  cases <- w %>% 
+    filter(date == rmonth[1] | date == rmonth[2] | date == rmonth[3]) %>% 
+    filter(disease_eng == disease_to_analyse) %>%
+    filter(Species_fg == species_to_analyse) %>% 
+    filter(reporting_level == "disease") %>%
+    group_by(Species_fg, iso_code, country) %>% 
+    summarize(cases=sum(cases, na.rm = TRUE))
+  cases
+  
+  # DB FAOSTATS ----
+  pop <- p %>% 
+    filter(Item %in% cases$Species_fg) %>% 
+    filter(Area.Code..ISO3. %in% cases$iso_code) %>% 
+    filter(Year %in% year(date_to_analyse))
+  
+  # WORLD MAP ----
+  
+    # Update the number of outbreaks on the map
+  wm$outbreak <- outb$outbreak[match(wm$ISO3, outb$iso_code)]
+
+    # Update the number of cases on the map
+  wm$cases <- cases$cases[match(wm$ISO3, cases$iso_code)]
+  
+  # Update the population on the map
+  wm$pop <- pop$Value[match(wm$ISO3, pop$Area.Code..ISO3.)]
+  
+  # Prevalence ----
+  wm$prev <- signif(wm$cases/wm$pop,3)
+ 
+# Maps of cases ----
+pal <- colorNumeric(
+  palette = "Spectral",
+   reverse = TRUE,
+  domain = wm$cases, 
+  na.color = "white")
+
+map <- leaflet(wm) %>%
+  addProviderTiles(providers$CartoDB.Positron)
+
+mc <- map %>%
+  setView(lng = 25, lat = 10, zoom = 2) %>%
+  addPolygons(weight = 0.5, 
+              color = ~pal(cases),
+              popup = ~paste(NAME, cases)) %>% 
+  addLegend("bottomright", pal = pal, values = ~cases,
+            title = paste("Cases",
+                          "<br>",
+                          date_to_analyse, 
+                          "<br>", 
+                          disease_to_analyse),
+            opacity = 1)
+
+# Map of disease occurrence ----
+pal <- colorNumeric(
+  palette = "Spectral",
+  reverse = TRUE,
+  domain = wm$prev, 
+  na.color = "white")
+
+map <- leaflet(wm) %>%
+  addProviderTiles(providers$CartoDB.Positron)
+
+mp <- map %>%
+  setView(lng = 25, lat = 10, zoom = 2) %>%
+  addPolygons(weight = 0.5, 
+              color = ~pal(prev),
+              popup = ~paste(NAME, prev)) %>% 
+  addLegend("bottomright", 
+            pal = pal, 
+            values = ~prev,
+            title = paste("Disease Occurrence (3 months)",
+                          "<br>",
+                          date_to_analyse, 
+                          "<br>", 
+                          disease_to_analyse),
+            opacity = 1)
+
+wm$range <- cut(wm$prev, breaks = lira_prob$range, include.lowest = TRUE)
+
+wm$ranking <- lira_prob$Ranking[match(wm$range, lira_prob$Range)]
+wm$def <- lira_prob$Qualitative.probability.definition[match(wm$range, lira_prob$Range)]
+
+wm %>% 
+       as.data.frame() %>% 
+       arrange(desc(prev)) %>% 
+       filter(!is.na(prev)) %>% 
+       select(NAME, outbreak, cases, pop, prev, range, ranking, def)
+
+}
+
+mc
+mp
+```
+
+## Set the disease, date, and functional group (species)
+```{r}
+disease_to_analyse <- "High pathogenicity avian influenza viruses (poultry) (Inf. with)"
+date_to_analyse <- ymd("2023-03-01")
+species_to_analyse <- "Birds_dom"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+```
+
+## Montly Results
+```{r}
+{
+  
+  w$date <- floor_date(w$`event_start date`, unit="month")
+  
+  # Number of outbreaks
+  outb <- w %>% 
+    filter(date == date_to_analyse) %>% 
+    filter(disease_eng == disease_to_analyse) %>%
+    filter(Species_fg == species_to_analyse) %>%
+    filter(reporting_level == "disease") %>%
+    group_by(Species_fg, iso_code, country, date) %>% 
+    summarize(outbreak=n())
+  outb
+  
+  # Number of Cases ----
+  # Species is for domestic and have the same ID as in faostats
+  cases <- w %>% 
+    filter(date == date_to_analyse) %>% 
+    filter(disease_eng == disease_to_analyse) %>% 
+    filter(Species_fg == species_to_analyse) %>% 
+    filter(reporting_level == "disease") %>% 
+    group_by(Species_fg, iso_code, country, date) %>% 
+    summarize(cases=sum(cases, na.rm = TRUE))
+  cases
+  
+#Population of animals  
+  pop <- p %>% 
+    filter(Item %in% cases$Species_fg) %>% 
+    filter(Area.Code..ISO3. %in% cases$iso_code) %>% 
+    filter(Year %in% year(date_to_analyse))
+  
+  # WORLD MAP ----
+  # Update the number of outbreaks on the map
+  wm$outbreak <- outb$outbreak[match(wm$ISO3, outb$iso_code)]
+  
+    # Update the number of cases on the map
+  wm$cases <- cases$cases[match(wm$ISO3, cases$iso_code)]
+  
+  # Update the population on the map
+  wm$pop <- pop$Value[match(wm$ISO3, pop$Area.Code..ISO3.)]
+  
+  # calculate the prevalence ----
+  wm$prev <- wm$cases/wm$pop
+ 
+  # Maps of outbreaks
+  pal <- colorNumeric(
+    palette = "Spectral",
+    domain = wm$outbreak, 
+    na.color = "white"
+  )
+  
+# Maps of cases ----
+pal <- colorNumeric(
+  palette = "Spectral",
+   reverse = TRUE,
+  domain = wm$cases, 
+  na.color = "white")
+
+map <- leaflet(wm) %>%
+  addProviderTiles(providers$CartoDB.Positron)
+
+mc <- map %>%
+  setView(lng = 25, lat = 10, zoom = 2) %>%
+  addPolygons(weight = 0.5, 
+              color = ~pal(cases),
+              popup = ~paste(NAME, cases)) %>% 
+  addLegend("bottomright", pal = pal, values = ~cases,
+            title = paste("Cases",
+                          "<br>",
+                          date_to_analyse, 
+                          "<br>", 
+                          disease_to_analyse),
+            opacity = 1)
+
+# Map of disease occurrence ----
+pal <- colorNumeric(
+  palette = "Spectral",
+  reverse = TRUE,
+  domain = wm$prev, 
+  na.color = "white")
+
+map <- leaflet(wm) %>%
+  addProviderTiles(providers$CartoDB.Positron)
+
+mp <- map %>%
+  setView(lng = 25, lat = 10, zoom = 2) %>%
+  addPolygons(weight = 0.5, 
+              color = ~pal(prev),
+              popup = ~paste(NAME, prev)) %>% 
+  addLegend("bottomright", pal = pal, values = ~prev,
+            title = paste("Disease Occurrence",
+                          "<br>",
+                          date_to_analyse, 
+                          "<br>", 
+                          disease_to_analyse),
+            opacity = 1)
+
+wm$range <- cut(wm$prev, breaks = lira_prob$range, include.lowest = TRUE)
+
+wm$ranking <- lira_prob$Ranking[match(wm$range, lira_prob$Range)]
+wm$def <- lira_prob$Qualitative.probability.definition[match(wm$range, lira_prob$Range)]
+
+wm %>% 
+       as.data.frame() %>% 
+       arrange(desc(prev)) %>% 
+       filter(!is.na(prev)) %>% 
+       select(NAME, outbreak, cases, pop, prev, range, ranking, def)
+}
+
+mc
+mp
+
+```
+
+## Acumulated three months
+```{r}
+# adding last three months
+rmonth <- date_to_analyse %m+% months(1:-1) 
+
+{
+  
+  w$date <- floor_date(w$`event_start date`, unit="month")
+  
+    # Number of outbreaks
+  outb <- w %>% 
+    filter(date == rmonth[1] | date == rmonth[2] | date == rmonth[3]) %>% 
+    filter(disease_eng == disease_to_analyse) %>%
+    filter(Species_fg == species_to_analyse) %>% 
+    filter(reporting_level == "disease") %>%
+    group_by(Species_fg, iso_code, country) %>% 
+    summarize(outbreak=n())
+  
+  outb
+  
+  # Number of Cases ----
+  # Species is for domestic and have the same ID as in faostats
+  cases <- w %>% 
+    filter(date == rmonth[1] | date == rmonth[2] | date == rmonth[3]) %>% 
+    filter(disease_eng == disease_to_analyse) %>%
+    filter(Species_fg == species_to_analyse) %>% 
+    filter(reporting_level == "disease") %>%
+    group_by(Species_fg, iso_code, country) %>% 
+    summarize(cases=sum(cases, na.rm = TRUE))
+  cases
+  
+  # DB FAOSTATS ----
+  pop <- p %>% 
+    filter(Item %in% cases$Species_fg) %>% 
+    filter(Area.Code..ISO3. %in% cases$iso_code) %>% 
+    filter(Year %in% year(date_to_analyse))
+  
+  # WORLD MAP ----
+  
+    # Update the number of outbreaks on the map
+  wm$outbreak <- outb$outbreak[match(wm$ISO3, outb$iso_code)]
+
+    # Update the number of cases on the map
+  wm$cases <- cases$cases[match(wm$ISO3, cases$iso_code)]
+  
+  # Update the population on the map
+  wm$pop <- pop$Value[match(wm$ISO3, pop$Area.Code..ISO3.)]
+  
+  # Prevalence ----
+  wm$prev <- signif(wm$cases/wm$pop,3)
+ 
+# Maps of cases ----
+pal <- colorNumeric(
+  palette = "Spectral",
+   reverse = TRUE,
+  domain = wm$cases, 
+  na.color = "white")
+
+map <- leaflet(wm) %>%
+  addProviderTiles(providers$CartoDB.Positron)
+
+mc <- map %>%
+  setView(lng = 25, lat = 10, zoom = 2) %>%
+  addPolygons(weight = 0.5, 
+              color = ~pal(cases),
+              popup = ~paste(NAME, cases)) %>% 
+  addLegend("bottomright", pal = pal, values = ~cases,
+            title = paste("Cases",
+                          "<br>",
+                          date_to_analyse, 
+                          "<br>", 
+                          disease_to_analyse),
+            opacity = 1)
+
+# Map of disease occurrence ----
+pal <- colorNumeric(
+  palette = "Spectral",
+  reverse = TRUE,
+  domain = wm$prev, 
+  na.color = "white")
+
+map <- leaflet(wm) %>%
+  addProviderTiles(providers$CartoDB.Positron)
+
+mp <- map %>%
+  setView(lng = 25, lat = 10, zoom = 2) %>%
+  addPolygons(weight = 0.5, 
+              color = ~pal(prev),
+              popup = ~paste(NAME, prev)) %>% 
+  addLegend("bottomright", 
+            pal = pal, 
+            values = ~prev,
+            title = paste("Disease Occurrence (3 months)",
+                          "<br>",
+                          date_to_analyse, 
+                          "<br>", 
+                          disease_to_analyse),
+            opacity = 1)
+
+wm$range <- cut(wm$prev, breaks = lira_prob$range, include.lowest = TRUE)
+
+wm$ranking <- lira_prob$Ranking[match(wm$range, lira_prob$Range)]
+wm$def <- lira_prob$Qualitative.probability.definition[match(wm$range, lira_prob$Range)]
+
+wm %>% 
+       as.data.frame() %>% 
+       arrange(desc(prev)) %>% 
+       filter(!is.na(prev)) %>% 
+       select(NAME, outbreak, cases, pop, prev, range, ranking, def)
+
+}
+
+mc
+mp
+```
+
+# Disease prevalence range
+## ASF 2019 Pigs 
+
+```{r}
+disease_to_analyse <- "African swine fever virus (Inf. with)"
+date_to_analyse <- floor_date(ymd("2019-01-01"), unit="year") #ASF
+species_to_analyse <- "Swine"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+```
+```{r}
+source("diseases_prev.R")
+
+# Ranges by year
+summary(wm$prev)
+table(!is.na(wm$prev))
+datatable(dt)
+mc
+mp
+wt <- w1
+```
+
+## ASF 2020 Pigs 
+
+```{r}
+disease_to_analyse <- "African swine fever virus (Inf. with)"
+date_to_analyse <- floor_date(ymd("2020-01-01"), unit="year") #ASF
+species_to_analyse <- "Swine"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+```
+```{r}
+source("diseases_prev.R")
+
+# Ranges by year
+summary(wm$prev)
+table(!is.na(wm$prev))
+datatable(dt) 
+mc
+mp
+wt <- rbind(wt,w1)
+
+```
+
+## ASF 2021 Pigs 
+```{r}
+disease_to_analyse <- "African swine fever virus (Inf. with)"
+date_to_analyse <- floor_date(ymd("2021-01-01"), unit="year") #ASF
+# species_to_analyse <- "Sus_scrofa"
+species_to_analyse <- "Swine"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+```
+```{r}
+source("diseases_prev.R")
+
+# Ranges by year
+summary(wm$prev)
+table(!is.na(wm$prev))
+datatable(dt)
+mc
+mp
+wt <- rbind(wt,w1)
+
+```
+
+## WNF 2019 Horses 
+```{r}
+disease_to_analyse <- "West Nile Fever"
+date_to_analyse <- floor_date(ymd("2019-01-01"), unit="year") #ASF
+# species_to_analyse <- "Sus_scrofa"
+species_to_analyse <- "Equidae_(dom)"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+```
+
+```{r}
+source("diseases_prev.R")
+
+# Ranges by year
+summary(wm$prev)
+table(!is.na(wm$prev))
+datatable(dt)
+mc
+mp
+wt <- rbind(wt,w1)
+
+```
+
+## WNF 2020 Horses 
+```{r}
+disease_to_analyse <- "West Nile Fever"
+date_to_analyse <- floor_date(ymd("2020-01-01"), unit="year")
+species_to_analyse <- "Equidae_(dom)"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+```
+
+```{r}
+source("diseases_prev.R")
+
+# Ranges by year
+summary(wm$prev)
+table(!is.na(wm$prev))
+datatable(dt)
+mc
+mp
+wt <- rbind(wt,w1)
+
+```
+
+## WNF 2021 Horses 
+```{r}
+disease_to_analyse <- "West Nile Fever"
+date_to_analyse <- floor_date(ymd("2021-01-01"), unit="year")
+species_to_analyse <- "Equidae_(dom)"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+```
+
+```{r}
+source("diseases_prev.R")
+
+# Ranges by year
+summary(wm$prev)
+table(!is.na(wm$prev))
+datatable(dt)
+mc
+mp
+wt <- rbind(wt,w1)
+```
+
+## BTV 2019 Cattle 
+```{r}
+disease_to_analyse <- "Bluetongue virus (Inf. with)"
+date_to_analyse <- floor_date(ymd("2019-01-01"), unit="year")
+species_to_analyse <- "Cattle"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+
+source("diseases_prev.R")
+
+# Ranges by year
+summary(wm$prev)
+table(!is.na(wm$prev))
+datatable(dt)
+mc
+mp
+wt <- rbind(wt,w1)
+```
+
+## BTV 2020 Cattle 
+```{r}
+disease_to_analyse <- "Bluetongue virus (Inf. with)"
+date_to_analyse <- floor_date(ymd("2020-01-01"), unit="year")
+species_to_analyse <- "Cattle"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+
+source("diseases_prev.R")
+
+# Ranges by year
+summary(wm$prev)
+table(!is.na(wm$prev))
+datatable(dt)
+mc
+mp
+wt <- rbind(wt,w1)
+```
+
+## BTV 2019 Sheep 
+```{r}
+disease_to_analyse <- "Bluetongue virus (Inf. with)"
+date_to_analyse <- floor_date(ymd("2019-01-01"), unit="year")
+species_to_analyse <- "Sheep"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+
+source("diseases_prev.R")
+
+# Ranges by year
+summary(wm$prev)
+table(!is.na(wm$prev))
+datatable(dt)
+mc
+mp
+wt <- rbind(wt,w1)
+```
+
+## BTV 2020 Sheep 
+```{r}
+disease_to_analyse <- "Bluetongue virus (Inf. with)"
+date_to_analyse <- floor_date(ymd("2020-01-01"), unit="year")
+species_to_analyse <- "Sheep"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+
+source("diseases_prev.R")
+
+# Ranges by year
+summary(wm$prev)
+table(!is.na(wm$prev))
+datatable(dt)
+mc
+mp
+wt <- rbind(wt,w1)
+```
+
+## BTV 2021 Sheep 
+```{r}
+disease_to_analyse <- "Bluetongue virus (Inf. with)"
+date_to_analyse <- floor_date(ymd("2021-01-01"), unit="year")
+species_to_analyse <- "Sheep"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+
+source("diseases_prev.R")
+
+# Ranges by year
+summary(wm$prev)
+table(!is.na(wm$prev))
+datatable(dt)
+mc
+mp
+wt <- rbind(wt,w1)
+```
+
+## RB 2019 Cattle 
+```{r}
+disease_to_analyse <- "Rabies virus (Inf. with)"
+date_to_analyse <- floor_date(ymd("2019-01-01"), unit="year")
+species_to_analyse <- "Cattle"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+
+source("diseases_prev.R")
+
+# Ranges by year
+summary(wm$prev)
+table(!is.na(wm$prev))
+datatable(dt)
+mc
+mp
+wt <- rbind(wt,w1)
+```
+
+## RB 2020 Cattle 
+```{r}
+disease_to_analyse <- "Rabies virus (Inf. with)"
+date_to_analyse <- floor_date(ymd("2020-01-01"), unit="year")
+species_to_analyse <- "Cattle"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+
+source("diseases_prev.R")
+
+# Ranges by year
+summary(wm$prev)
+table(!is.na(wm$prev))
+datatable(dt)
+mc
+mp
+wt <- rbind(wt,w1)
+```
+
+## HPAI 2019 Birds 
+```{r}
+disease_to_analyse <- "High pathogenicity avian influenza viruses (poultry) (Inf. with)"
+date_to_analyse <- floor_date(ymd("2019-01-01"), unit="year")
+species_to_analyse <- "Birds_dom"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+
+{
+  w$date <- floor_date(w$`event_start date`, unit="year")
+  
+  # Number of Cases ----
+  # Species is for domestic and have the same ID as in faostats
+  cases <- w %>% 
+    filter(date == date_to_analyse) %>% 
+    filter(disease_eng == disease_to_analyse) %>%
+    filter(Species_fg == species_to_analyse) %>% 
+    group_by(Species_fg, iso_code, country, reporting_level) %>% 
+    summarize(cases = sum(cases, na.rm = TRUE))
+  cases
+  
+  # DB FAOSTATS ----
+  pop <- p %>% 
+    filter(Item %in% cases$Species_fg) %>% 
+    filter(Area.Code..ISO3. %in% cases$iso_code) %>% 
+    filter(Year %in% year(date_to_analyse))
+  
+  nrow(pop)
+  
+  # WORLD MAP ----
+  
+  # Update the number of cases on the map
+  wm$cases <- cases$cases[match(wm$ISO3, cases$iso_code)]
+  
+  # Update the population on the map
+  wm$pop <- (pop$Value[match(wm$ISO3, pop$Area.Code..ISO3.)])*1000
+  
+  # Prevalence ----
+  wm$prev <- signif(wm$cases/wm$pop,3)
+  
+  # Maps of cases ----
+  pal <- colorNumeric(
+    palette = "Spectral",
+    reverse = TRUE,
+    domain = wm$cases, 
+    na.color = "white")
+  
+  map <- leaflet(wm) %>%
+    addProviderTiles(providers$CartoDB.Positron)
+  
+  mc <- map %>%
+    setView(lng = 25, lat = 10, zoom = 2) %>%
+    addPolygons(weight = 0.5, 
+                color = ~pal(cases),
+                popup = ~paste(NAME, cases)) %>% 
+    addLegend("bottomright", pal = pal, values = ~cases,
+              title = paste("Cases",
+                            "<br>",
+                            date_to_analyse, 
+                            "<br>", 
+                            disease_to_analyse),
+              opacity = 0.4)
+  
+  # Map of disease occurrence ----
+  pal <- colorNumeric(
+    palette = "Spectral",
+    reverse = TRUE,
+    domain = wm$prev, 
+    na.color = "white")
+  
+  map <- leaflet(wm) %>%
+    addProviderTiles(providers$CartoDB.Positron)
+  
+  mp <- map %>%
+    setView(lng = 25, lat = 10, zoom = 2) %>%
+    addPolygons(weight = 0.5, 
+                color = ~pal(prev),
+                popup = ~paste(NAME, prev)) %>% 
+    addLegend("bottomright", 
+              pal = pal, 
+              values = ~prev,
+              title = paste("Disease Occurrence (year)",
+                            "<br>",
+                            date_to_analyse, 
+                            "<br>", 
+                            disease_to_analyse),
+              opacity = 0.4)
+  
+  wm$range <- cut(wm$prev, breaks = lira_prob$range, include.lowest = TRUE)
+  
+  wm$ranking <- lira_prob$Ranking[match(wm$range, lira_prob$Range)]
+  wm$def <- lira_prob$Qualitative.probability.definition[match(wm$range, lira_prob$Range)]
+  
+  dt <- wm %>% 
+    as.data.frame() %>% 
+    arrange(desc(prev)) %>% 
+    filter(!is.na(prev)) %>% 
+    select(NAME, cases, pop, prev, range, ranking, def)
+
+  wm <<- wm
+  wo <- as.data.frame(wm[,c(3,5,8,9,13:18)])
+  wo <- wo[, -11]
+  wo$date <- date_to_analyse
+  wo$disease <- disease_to_analyse
+  wo$species <- species_to_analyse
+  w1 <<- wo
+    
+  (wm)
+  
+  }
+
+# Ranges by year
+summary(wm$prev)
+table(!is.na(wm$prev))
+datatable(dt)
+mc
+mp
+wt <- rbind(wt,w1)
+```
+
+## HPAI 2020 Birds 
+```{r}
+disease_to_analyse <- "High pathogenicity avian influenza viruses (poultry) (Inf. with)"
+date_to_analyse <- floor_date(ymd("2020-01-01"), unit="year")
+species_to_analyse <- "Birds_dom"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+
+{
+  w$date <- floor_date(w$`event_start date`, unit="year")
+  
+  # Number of Cases ----
+  # Species is for domestic and have the same ID as in faostats
+  cases <- w %>% 
+    filter(date == date_to_analyse) %>% 
+    filter(disease_eng == disease_to_analyse) %>%
+    filter(Species_fg == species_to_analyse) %>% 
+    group_by(Species_fg, iso_code, country, reporting_level) %>% 
+    summarize(cases = sum(cases, na.rm = TRUE))
+  cases
+  
+  # DB FAOSTATS ----
+  pop <- p %>% 
+    filter(Item %in% cases$Species_fg) %>% 
+    filter(Area.Code..ISO3. %in% cases$iso_code) %>% 
+    filter(Year %in% year(date_to_analyse))
+  
+  nrow(pop)
+  
+  # WORLD MAP ----
+  
+  # Update the number of cases on the map
+  wm$cases <- cases$cases[match(wm$ISO3, cases$iso_code)]
+  
+  # Update the population on the map
+  wm$pop <- (pop$Value[match(wm$ISO3, pop$Area.Code..ISO3.)])*1000
+  
+  # Prevalence ----
+  wm$prev <- signif(wm$cases/wm$pop,3)
+  
+  # Maps of cases ----
+  pal <- colorNumeric(
+    palette = "Spectral",
+    reverse = TRUE,
+    domain = wm$cases, 
+    na.color = "white")
+  
+  map <- leaflet(wm) %>%
+    addProviderTiles(providers$CartoDB.Positron)
+  
+  mc <- map %>%
+    setView(lng = 25, lat = 10, zoom = 2) %>%
+    addPolygons(weight = 0.5, 
+                color = ~pal(cases),
+                popup = ~paste(NAME, cases)) %>% 
+    addLegend("bottomright", pal = pal, values = ~cases,
+              title = paste("Cases",
+                            "<br>",
+                            date_to_analyse, 
+                            "<br>", 
+                            disease_to_analyse),
+              opacity = 0.4)
+  
+  # Map of disease occurrence ----
+  pal <- colorNumeric(
+    palette = "Spectral",
+    reverse = TRUE,
+    domain = wm$prev, 
+    na.color = "white")
+  
+  map <- leaflet(wm) %>%
+    addProviderTiles(providers$CartoDB.Positron)
+  
+  mp <- map %>%
+    setView(lng = 25, lat = 10, zoom = 2) %>%
+    addPolygons(weight = 0.5, 
+                color = ~pal(prev),
+                popup = ~paste(NAME, prev)) %>% 
+    addLegend("bottomright", 
+              pal = pal, 
+              values = ~prev,
+              title = paste("Disease Occurrence (year)",
+                            "<br>",
+                            date_to_analyse, 
+                            "<br>", 
+                            disease_to_analyse),
+              opacity = 0.4)
+  
+  wm$range <- cut(wm$prev, breaks = lira_prob$range, include.lowest = TRUE)
+  
+  wm$ranking <- lira_prob$Ranking[match(wm$range, lira_prob$Range)]
+  wm$def <- lira_prob$Qualitative.probability.definition[match(wm$range, lira_prob$Range)]
+  
+  dt <- wm %>% 
+    as.data.frame() %>% 
+    arrange(desc(prev)) %>% 
+    filter(!is.na(prev)) %>% 
+    select(NAME, cases, pop, prev, range, ranking, def)
+  
+  wm <<- wm
+  wo <- as.data.frame(wm[,c(3,5,8,9,13:18)])
+  wo <- wo[, -11]
+  wo$date <- date_to_analyse
+  wo$disease <- disease_to_analyse
+  wo$species <- species_to_analyse
+  w1 <<- wo
+    
+  (wm)
+  
+  }
+
+# Ranges by year
+summary(wm$prev)
+table(!is.na(wm$prev))
+datatable(dt)
+mc
+mp
+wt <- rbind(wt,w1)
+```
+
+## HPAI 2021 Birds 
+```{r}
+disease_to_analyse <- "High pathogenicity avian influenza viruses (poultry) (Inf. with)"
+date_to_analyse <- floor_date(ymd("2021-01-01"), unit="year")
+species_to_analyse <- "Birds_dom"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+
+{
+  w$date <- floor_date(w$`event_start date`, unit="year")
+  
+  # Number of Cases ----
+  # Species is for domestic and have the same ID as in faostats
+  cases <- w %>% 
+    filter(date == date_to_analyse) %>% 
+    filter(disease_eng == disease_to_analyse) %>%
+    filter(Species_fg == species_to_analyse) %>% 
+    group_by(Species_fg, iso_code, country, reporting_level) %>% 
+    summarize(cases = sum(cases, na.rm = TRUE))
+  cases
+  
+  # DB FAOSTATS ----
+  pop <- p %>% 
+    filter(Item %in% cases$Species_fg) %>% 
+    filter(Area.Code..ISO3. %in% cases$iso_code) %>% 
+    filter(Year %in% year(date_to_analyse))
+  
+  nrow(pop)
+  
+  # WORLD MAP ----
+  
+  # Update the number of cases on the map
+  wm$cases <- cases$cases[match(wm$ISO3, cases$iso_code)]
+  
+  # Update the population on the map
+  wm$pop <- (pop$Value[match(wm$ISO3, pop$Area.Code..ISO3.)])*1000
+  
+  # Prevalence ----
+  wm$prev <- signif(wm$cases/wm$pop,3)
+  
+  # Maps of cases ----
+  pal <- colorNumeric(
+    palette = "Spectral",
+    reverse = TRUE,
+    domain = wm$cases, 
+    na.color = "white")
+  
+  map <- leaflet(wm) %>%
+    addProviderTiles(providers$CartoDB.Positron)
+  
+  mc <- map %>%
+    setView(lng = 25, lat = 10, zoom = 2) %>%
+    addPolygons(weight = 0.5, 
+                color = ~pal(cases),
+                popup = ~paste(NAME, cases)) %>% 
+    addLegend("bottomright", pal = pal, values = ~cases,
+              title = paste("Cases",
+                            "<br>",
+                            date_to_analyse, 
+                            "<br>", 
+                            disease_to_analyse),
+              opacity = 0.4)
+  
+  # Map of disease occurrence ----
+  pal <- colorNumeric(
+    palette = "Spectral",
+    reverse = TRUE,
+    domain = wm$prev, 
+    na.color = "white")
+  
+  map <- leaflet(wm) %>%
+    addProviderTiles(providers$CartoDB.Positron)
+  
+  mp <- map %>%
+    setView(lng = 25, lat = 10, zoom = 2) %>%
+    addPolygons(weight = 0.5, 
+                color = ~pal(prev),
+                popup = ~paste(NAME, prev)) %>% 
+    addLegend("bottomright", 
+              pal = pal, 
+              values = ~prev,
+              title = paste("Disease Occurrence (year)",
+                            "<br>",
+                            date_to_analyse, 
+                            "<br>", 
+                            disease_to_analyse),
+              opacity = 0.4)
+  
+  wm$range <- cut(wm$prev, breaks = lira_prob$range, include.lowest = TRUE)
+  
+  wm$ranking <- lira_prob$Ranking[match(wm$range, lira_prob$Range)]
+  wm$def <- lira_prob$Qualitative.probability.definition[match(wm$range, lira_prob$Range)]
+  
+  dt <- wm %>% 
+    as.data.frame() %>% 
+    arrange(desc(prev)) %>% 
+    filter(!is.na(prev)) %>% 
+    select(NAME, cases, pop, prev, range, ranking, def)
+  
+  wm <<- wm
+  wo <- as.data.frame(wm[,c(3,5,8,9,13:18)])
+  wo <- wo[, -11]
+  wo$date <- date_to_analyse
+  wo$disease <- disease_to_analyse
+  wo$species <- species_to_analyse
+  w1 <<- wo
+    
+  (wm)
+  
+  }
+
+# Ranges by year
+summary(wm$prev)
+table(!is.na(wm$prev))
+datatable(dt)
+mc
+mp
+# sync(mc, mp)
+
+wt <- rbind(wt,w1)
+```
+
+## LSD 2019 cattle 
+```{r}
+disease_to_analyse <- "Lumpy skin disease virus (Inf. with)"
+date_to_analyse <- floor_date(ymd("2019-01-01"), unit="year")
+species_to_analyse <- "Cattle"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+
+source("diseases_prev.R")
+
+# Ranges by year
+summary(wm$prev)
+table(!is.na(wm$prev))
+datatable(dt)
+mc
+mp
+wt <- rbind(wt,w1)
+```
+
+## LSD 2020 cattle 
+```{r}
+disease_to_analyse <- "Lumpy skin disease virus (Inf. with)"
+date_to_analyse <- floor_date(ymd("2020-01-01"), unit="year")
+species_to_analyse <- "Cattle"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+
+source("diseases_prev.R")
+
+# Ranges by year
+summary(wm$prev)
+table(!is.na(wm$prev))
+datatable(dt)
+mc
+mp
+wt <- rbind(wt,w1)
+```
+
+## LSD 2021 cattle 
+```{r}
+disease_to_analyse <- "Lumpy skin disease virus (Inf. with)"
+date_to_analyse <- floor_date(ymd("2021-01-01"), unit="year")
+species_to_analyse <- "Cattle"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+
+source("diseases_prev.R")
+
+# Ranges by year
+summary(wm$prev)
+table(!is.na(wm$prev))
+datatable(dt)
+mc
+mp                                                                                                             
+wt <- rbind(wt,w1)
+```
+
+## RVF 2019 Cattle 
+```{r}
+disease_to_analyse <- "Rift Valley fever virus (Inf. with)"
+date_to_analyse <- floor_date(ymd("2019-01-01"), unit="year")
+species_to_analyse <- "Cattle"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+
+source("diseases_prev.R")
+
+# Ranges by year
+summary(wm$prev)
+table(!is.na(wm$prev))
+datatable(dt)
+mc
+mp
+wt <- rbind(wt,w1)
+```
+
+## RVF 2020 Cattle 
+```{r}
+disease_to_analyse <- "Rift Valley fever virus (Inf. with)"
+date_to_analyse <- floor_date(ymd("2020-01-01"), unit="year")
+species_to_analyse <- "Cattle"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+
+source("diseases_prev.R")
+
+# Ranges by year
+summary(wm$prev)
+table(!is.na(wm$prev))
+datatable(dt)
+mc
+mp
+wt <- rbind(wt,w1)
+```
+
+## RVF 2021 Cattle 
+```{r}
+disease_to_analyse <- "Rift Valley fever virus (Inf. with)"
+date_to_analyse <- floor_date(ymd("2021-01-01"), unit="year")
+species_to_analyse <- "Cattle"
+
+date_to_analyse
+disease_to_analyse
+species_to_analyse
+
+source("diseases_prev.R")
+
+# Ranges by year
+summary(wm$prev)
+table(!is.na(wm$prev))
+datatable(dt)
+mc
+mp
+wt <- rbind(wt,w1)
+```
+
+# Resume
+```{r}
+datatable(wt %>% 
+  group_by(disease, date, species) %>%
+  summarise(mean_prevalence=mean(prev, na.rm = TRUE)))
+
+table(wt$disease)
+
+wt2 <- wt %>% 
+  group_by(disease, date, species) %>%
+  summarise(mean_prevalence=mean(prev, na.rm = TRUE))
+
+wt2$range <- cut(wt2$mean_prevalence, breaks = lira_prob$range, include.lowest = TRUE)
+wt2$ranking <- lira_prob$Ranking[match(wt2$range, lira_prob$Range)]
+wt2$def <- lira_prob$Qualitative.probability.definition[match(wt2$range, lira_prob$Range)]
+
+write.csv(wt, file = "diseases.resume.csv")
+
+write.csv(wt2, file = "diseases.mean.csv")
+```
+
+
+# Credits 
+Acosta, Alfredo PhD<sup>1</sup>. 
+**SVA<sup>1</sup>**: SVA <http://www.sva.se/>. 
