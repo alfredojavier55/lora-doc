@@ -27,6 +27,7 @@ library(lubridate)
 library(leaflet)
 library(sf)
 library(DT)
+library(psych)
 ```
 
 ```{r}
@@ -104,10 +105,11 @@ head(table(w$Species_fg[w$is_wild == FALSE]) %>%
 ```
 ## Probabiltiy definitions (lira table)
 ```{r}
-lira_prob <- read.csv(file = "ranges.csv", sep = ";")
-lira_prob$Range <- cut(lira_prob$range, breaks = lira_prob$range, include.lowest = TRUE)
-lira_prob <- lira_prob[-7,]
-lira_prob
+lira_prob <- read.csv(file = "ranges3.csv", sep = ";")
+# lira_prob <- lira_prob[-7,]
+# lira_prob <- lira_prob[-6,]
+lira_prob$Range <- cut(lira_prob$range, breaks = lira_prob$range, include.lowest = FALSE)
+datatable(lira_prob)
 ```
 
 
@@ -863,11 +865,17 @@ source("diseases_prev.R")
 
 # Ranges by year
 summary(wm$prev)
+
+st <- s1
+st <- rbind(st,s1)
+
 table(!is.na(wm$prev))
 datatable(dt)
 mc
 mp
 wt <- w1
+
+table(dt$def)
 ```
 
 ## ASF 2020 Pigs 
@@ -886,6 +894,8 @@ source("diseases_prev.R")
 
 # Ranges by year
 summary(wm$prev)
+st <- rbind(st,s1)
+
 table(!is.na(wm$prev))
 datatable(dt) 
 mc
@@ -910,6 +920,8 @@ source("diseases_prev.R")
 
 # Ranges by year
 summary(wm$prev)
+st <- rbind(st,s1)
+
 table(!is.na(wm$prev))
 datatable(dt)
 mc
@@ -935,6 +947,8 @@ source("diseases_prev.R")
 
 # Ranges by year
 summary(wm$prev)
+st <- rbind(st,s1)
+
 table(!is.na(wm$prev))
 datatable(dt)
 mc
@@ -959,6 +973,8 @@ source("diseases_prev.R")
 
 # Ranges by year
 summary(wm$prev)
+st <- rbind(st,s1)
+
 table(!is.na(wm$prev))
 datatable(dt)
 mc
@@ -983,6 +999,8 @@ source("diseases_prev.R")
 
 # Ranges by year
 summary(wm$prev)
+st <- rbind(st,s1)
+
 table(!is.na(wm$prev))
 datatable(dt)
 mc
@@ -1004,6 +1022,8 @@ source("diseases_prev.R")
 
 # Ranges by year
 summary(wm$prev)
+st <- rbind(st,s1)
+
 table(!is.na(wm$prev))
 datatable(dt)
 mc
@@ -1025,6 +1045,8 @@ source("diseases_prev.R")
 
 # Ranges by year
 summary(wm$prev)
+st <- rbind(st,s1)
+
 table(!is.na(wm$prev))
 datatable(dt)
 mc
@@ -1046,6 +1068,8 @@ source("diseases_prev.R")
 
 # Ranges by year
 summary(wm$prev)
+st <- rbind(st,s1)
+
 table(!is.na(wm$prev))
 datatable(dt)
 mc
@@ -1067,6 +1091,8 @@ source("diseases_prev.R")
 
 # Ranges by year
 summary(wm$prev)
+st <- rbind(st,s1)
+
 table(!is.na(wm$prev))
 datatable(dt)
 mc
@@ -1088,6 +1114,8 @@ source("diseases_prev.R")
 
 # Ranges by year
 summary(wm$prev)
+st <- rbind(st,s1)
+
 table(!is.na(wm$prev))
 datatable(dt)
 mc
@@ -1109,6 +1137,8 @@ source("diseases_prev.R")
 
 # Ranges by year
 summary(wm$prev)
+st <- rbind(st,s1)
+
 table(!is.na(wm$prev))
 datatable(dt)
 mc
@@ -1130,6 +1160,8 @@ source("diseases_prev.R")
 
 # Ranges by year
 summary(wm$prev)
+st <- rbind(st,s1)
+
 table(!is.na(wm$prev))
 datatable(dt)
 mc
@@ -1252,6 +1284,8 @@ species_to_analyse
 
 # Ranges by year
 summary(wm$prev)
+st <- rbind(st,s1)
+
 table(!is.na(wm$prev))
 datatable(dt)
 mc
@@ -1374,6 +1408,8 @@ species_to_analyse
 
 # Ranges by year
 summary(wm$prev)
+st <- rbind(st,s1)
+
 table(!is.na(wm$prev))
 datatable(dt)
 mc
@@ -1496,6 +1532,8 @@ species_to_analyse
 
 # Ranges by year
 summary(wm$prev)
+st <- rbind(st,s1)
+
 table(!is.na(wm$prev))
 datatable(dt)
 mc
@@ -1519,6 +1557,8 @@ source("diseases_prev.R")
 
 # Ranges by year
 summary(wm$prev)
+st <- rbind(st,s1)
+
 table(!is.na(wm$prev))
 datatable(dt)
 mc
@@ -1540,6 +1580,8 @@ source("diseases_prev.R")
 
 # Ranges by year
 summary(wm$prev)
+st <- rbind(st,s1)
+
 table(!is.na(wm$prev))
 datatable(dt)
 mc
@@ -1561,6 +1603,8 @@ source("diseases_prev.R")
 
 # Ranges by year
 summary(wm$prev)
+st <- rbind(st,s1)
+
 table(!is.na(wm$prev))
 datatable(dt)
 mc
@@ -1582,6 +1626,8 @@ source("diseases_prev.R")
 
 # Ranges by year
 summary(wm$prev)
+st <- rbind(st,s1)
+
 table(!is.na(wm$prev))
 datatable(dt)
 mc
@@ -1603,6 +1649,8 @@ source("diseases_prev.R")
 
 # Ranges by year
 summary(wm$prev)
+st <- rbind(st,s1)
+
 table(!is.na(wm$prev))
 datatable(dt)
 mc
@@ -1624,6 +1672,8 @@ source("diseases_prev.R")
 
 # Ranges by year
 summary(wm$prev)
+st <- rbind(st,s1)
+
 table(!is.na(wm$prev))
 datatable(dt)
 mc
@@ -1632,24 +1682,87 @@ wt <- rbind(wt,w1)
 ```
 
 # Resume
+## Numeric results by disease annual prevalence and categories
 ```{r}
-datatable(wt %>% 
-  group_by(disease, date, species) %>%
-  summarise(mean_prevalence=mean(prev, na.rm = TRUE)))
-
-table(wt$disease)
+# datatable(wt %>% 
+#   group_by(disease, date, species) %>%
+#   summarise(mean_prevalence=round(mean(prev, na.rm = TRUE),6)))
 
 wt2 <- wt %>% 
   group_by(disease, date, species) %>%
-  summarise(mean_prevalence=mean(prev, na.rm = TRUE))
+  summarise(m=as.numeric(round(mean(prev, na.rm = TRUE),6)),
+            md=as.numeric(round(median(prev, na.rm = TRUE),6)))
 
-wt2$range <- cut(wt2$mean_prevalence, breaks = lira_prob$range, include.lowest = TRUE)
+wt2$range <- cut(wt2$m, breaks = lira_prob$range, include.lowest = TRUE)
 wt2$ranking <- lira_prob$Ranking[match(wt2$range, lira_prob$Range)]
 wt2$def <- lira_prob$Qualitative.probability.definition[match(wt2$range, lira_prob$Range)]
 
+datatable(wt2)
+```
+
+##Graphics
+```{r}
+library(ggplot2)
+
+wt %>% 
+  group_by(disease, date, species) %>%
+  ggplot(aes(prev, color=disease, group=date))+
+  geom_boxplot()+
+  facet_grid(vars(disease), vars(date), scales = "free_x") +
+  theme(legend.position="none")+
+  labs(title = "Prevalence by years")
+
+wt %>% 
+  group_by(disease, date, species) %>%
+  ggplot(aes(prev, color=disease, group=date))+
+  geom_boxplot()+
+  facet_grid(vars(disease), vars(date), scales = "free_x") +
+  scale_x_log10() +
+  theme(legend.position="none")+
+  labs(title = "Prevalence by years (log scale)")
+
+
+wt %>% 
+  group_by(disease, date, species) %>%
+  ggplot(aes(prev, color=disease)) +
+  geom_boxplot()+
+  facet_wrap(vars(disease), ncol = 1) +
+  theme_minimal() +
+  theme(legend.position="none")+
+  labs(title = "Prevalence by disease")
+
+wt %>% 
+  group_by(disease, date, species) %>%
+  ggplot(aes(prev, color=disease)) +
+  geom_boxplot()+
+  facet_wrap(vars(disease), ncol = 1, scales = "free_x") +
+  theme_minimal() +
+  theme(legend.position="none") +
+  labs(title = "Prevalence by disease (scale free)")
+
+
+wt %>% 
+  group_by(disease, date, species) %>%
+  ggplot(aes(prev, color=disease)) +
+  geom_boxplot()+
+  facet_wrap(vars(disease), ncol = 1) +
+  scale_x_log10()+
+  theme_minimal() +
+  theme(legend.position="none") +
+  labs(title = "Prevalence by disease (log scale)")
+
+
+
+```
+
+##Saving results
+```{r}
 write.csv(wt, file = "diseases.resume.csv")
 
 write.csv(wt2, file = "diseases.mean.csv")
+
+write.csv(st, file = "summary.mean.csv")
+
 ```
 
 
